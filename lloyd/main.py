@@ -1,123 +1,163 @@
+# analyze_competitors_for_search_term.py
+
 import requests
 from bs4 import BeautifulSoup
 from collections import Counter
 import re
 import ssl
+import certifi
 import nltk
+from urllib.parse import urlparse
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.decomposition import LatentDirichletAllocation as LDA
 
-# Bypass SSL verification if necessary
 ssl._create_default_https_context = ssl._create_unverified_context
 
-# Import necessary NLTK components
 from nltk.corpus import stopwords
 from nltk.tokenize import word_tokenize
 
-# Ensure stopwords and punkt are downloaded
+# Ensure stopwords are downloaded
 nltk.download('stopwords')
 nltk.download('punkt')
-nltk.download('punkt_tab')
 
-# Define the stopwords set
 stop_words = set(stopwords.words('english'))
 
-def filter_keywords(keywords):
-    """
-    Filter out stopwords and non-alphabetic tokens from the keywords list.
-    """
-    tokens = word_tokenize(" ".join([word for word, _ in keywords]))
-    filtered_keywords = [word for word in tokens if word.lower() not in stop_words and word.isalpha()]
-    return filtered_keywords
+def filter_search_terms(search_terms):
+    filtered_terms = [
+        " ".join([word for word in phrase.split() if word.lower() not in stop_words and word.isalpha()])
+        for phrase in search_terms
+    ]
+    filtered_terms = [term for term in filtered_terms if term]
+    return filtered_terms
 
 def scrape_duckduckgo(query):
-    """
-    Scrape DuckDuckGo search results for a given query.
-    """
-    # Prepare the search URL
     search_url = f"https://html.duckduckgo.com/html?q={query}"
-    
-    # Headers to mimic a real browser request
     headers = {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.3'
     }
     
-    # Send the GET request to DuckDuckGo with headers
     response = requests.get(search_url, headers=headers)
     
-    # Check if the request was successful
     if response.status_code != 200:
         print(f"Failed to retrieve search results. Status code: {response.status_code}")
         return []
     
-    # Parse the HTML content
     soup = BeautifulSoup(response.text, 'html.parser')
-    
-    # Find all the result links in the search results
     results = []
     for link in soup.find_all('a', class_='result__a', href=True):
         url = link['href']
-        # Filter out DuckDuckGo internal URLs
-        if "duckduckgo.com" not in url:
-            results.append(url)
+        results.append(url)
     
     return results
 
-def extract_keywords_from_url(url):
-    """
-    Extract and count keywords from the content of the given URL.
-    """
-    # Headers to mimic a real browser request
+def extract_text_from_url(url):
     headers = {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.3'
     }
     
-    # Send the GET request to the website
     try:
         response = requests.get(url, headers=headers)
         if response.status_code != 200:
             print(f"Failed to retrieve content from {url}. Status code: {response.status_code}")
-            return []
+            return ""
     except requests.exceptions.RequestException as e:
         print(f"Error accessing {url}: {e}")
-        return []
+        return ""
     
-    # Parse the HTML content
     soup = BeautifulSoup(response.text, 'html.parser')
-    
-    # Extract the text content from the website
     text = ' '.join(soup.stripped_strings)
-    
-    # Use a regex to extract words and count their occurrences
-    words = re.findall(r'\b\w+\b', text.lower())
-    word_counts = Counter(words)
-    
-    # Identify the most common keywords
-    keywords = word_counts.most_common(40)  # Top 10 most common words
-    return keywords
+    return text
 
-def analyze_competitors_for_keyword(keyword):
-    """
-    Analyze top competitor websites for a given keyword to identify their top keywords.
-    """
-    # Step 1: Get a list of URLs from DuckDuckGo search
-    urls = scrape_duckduckgo(keyword)
+def is_company_website(url):
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.3'
+    }
+
+    try:
+        response = requests.get(url, headers=headers)
+        soup = BeautifulSoup(response.text, 'html.parser')
+
+        title = soup.title.string if soup.title else ""
+        meta_description_tag = soup.find('meta', attrs={'name': 'description'})
+        meta_description = meta_description_tag['content'] if meta_description_tag else ""
+        page_text = ' '.join(soup.stripped_strings)
+
+    except requests.exceptions.RequestException:
+        return False
+
+    company_indicators = ['inc', 'llc', 'corp', 'ltd', 'company', 'group', 'holdings', 'corporate', 'services', 'solutions', 'partners', 'clients']
+    
+    if any(indicator in title.lower() + meta_description.lower() for indicator in company_indicators):
+        return True
+    
+    business_terms_count = sum(page_text.lower().count(term) for term in company_indicators)
+    
+    if business_terms_count > 5:  # Threshold can be adjusted based on testing
+        return True
+    
+    non_business_domains = ['.edu', '.org', '.gov', '.blog', '.net']
+    parsed_url = urlparse(url)
+    if any(parsed_url.netloc.endswith(domain) for domain in non_business_domains):
+        return False
+
+    known_non_business_sites = [
+        'geeksforgeeks.org', 'wikipedia.org', 'stackoverflow.com', 'github.com', 
+        'medium.com', 'reddit.com', 'nytimes.com', 'bbc.co.uk', 'cnn.com', 'theguardian.com',
+        'archive.org', 'coursera.org', 'edx.org', 'khanacademy.org', 'quora.com', 'udemy.com',
+        'nytimes.com', 'bloomberg.com', 'dev.to', 'mozilla.org', 'developer.android.com', 
+        'docs.python.org', 'mdn.mozilla.org'
+    ]
+    if any(site in url for site in known_non_business_sites):
+        return False
+    
+    return True
+
+def perform_topic_clustering(texts, num_topics=5):
+    # Vectorize the text using TF-IDF
+    vectorizer = TfidfVectorizer(max_df=0.95, min_df=2, stop_words='english')
+    tfidf_matrix = vectorizer.fit_transform(texts)
+    
+    # Apply LDA for topic modeling
+    lda = LDA(n_components=num_topics, random_state=0)
+    lda.fit(tfidf_matrix)
+    
+    feature_names = vectorizer.get_feature_names_out()
+    topics = {}
+    
+    for idx, topic in enumerate(lda.components_):
+        topics[idx] = [feature_names[i] for i in topic.argsort()[:-11:-1]]
+    
+    return topics
+
+def analyze_competitors_for_search_term(search_term):
+    urls = scrape_duckduckgo(search_term)
     
     if not urls:
         print("No search results found.")
         return
     
-    # Step 2: Scrape each URL to extract keywords
-    for url in urls:
-        print(f"\nAnalyzing {url}")
-        keywords = extract_keywords_from_url(url)
-        filtered_keywords = filter_keywords(keywords)
-        if filtered_keywords:
-            print("Top Keywords:")
-            for word in filtered_keywords:
-                print(f"{word}")
-        else:
-            print("No keywords found or failed to retrieve content.")
+    all_texts = []  # To store the text of all competitor sites
     
+    for url in urls:
+        if is_company_website(url):
+            print(f"\nAnalyzing {url}")
+            text = extract_text_from_url(url)
+            if text:
+                all_texts.append(text)
+            else:
+                print("Failed to retrieve content.")
+        else:
+            print(f"\nSkipping non-company website: {url}")
+    
+    if all_texts:
+        topics = perform_topic_clustering(all_texts)
+        print("\nIdentified Topics Across Competitors:")
+        for idx, words in topics.items():
+            print(f"Topic {idx + 1}: {', '.join(words)}")
+    else:
+        print("No text data to analyze.")
+
 # Example usage
 if __name__ == "__main__":
-    keyword = "automated testing tool"
-    analyze_competitors_for_keyword(keyword)
+    search_term = "automated testing tool"
+    analyze_competitors_for_search_term(search_term)
