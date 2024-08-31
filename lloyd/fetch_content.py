@@ -1,18 +1,38 @@
+#fetch_content.py
+
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
 from webdriver_manager.chrome import ChromeDriverManager
 from bs4 import BeautifulSoup
 import time
+from selenium.common.exceptions import WebDriverException
 
-def fetch_content_from_url(url, text_limit=2000):
-    # Setup Selenium WebDriver
+def fetch_content_from_url(url, text_limit=2000, retries=3):
+    # Retry logic to handle intermittent WebDriver issues
+    attempt = 0
+    while attempt < retries:
+        try:
+            return _fetch_content(url, text_limit)
+        except WebDriverException as e:
+            print(f"Attempt {attempt + 1} failed: {str(e)}")
+            attempt += 1
+            time.sleep(5)
+    raise WebDriverException(f"Failed to fetch the content after {retries} attempts")
+
+def _fetch_content(url, text_limit):
+    # Setup Selenium WebDriver with extended timeout options and optimizations
     options = webdriver.ChromeOptions()
     options.add_argument("--headless")
+    options.add_argument("--disable-gpu")
+    options.add_argument("--no-sandbox")
+    options.add_argument("--disable-dev-shm-usage")
+
     driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=options)
+    driver.set_page_load_timeout(60)  # Increase page load timeout
 
     # Fetch the page content
     driver.get(url)
-    time.sleep(2)  # Let the page load completely
+    time.sleep(5)  # Increase sleep time to ensure the page loads completely
     page_source = driver.page_source
     driver.quit()  # Close the browser
 
