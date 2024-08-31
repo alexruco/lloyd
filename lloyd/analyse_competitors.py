@@ -4,7 +4,7 @@ import time
 import random
 from lloyd.old.scraper import scrape_duckduckgo, extract_text_from_url
 from text_processing import filter_search_terms
-from topic_modeling import perform_topic_clustering
+from lloyd.old.topic_modeling import perform_topic_clustering
 from utils import is_company_website
 from bertha import crawl_website, indexible_pages
 
