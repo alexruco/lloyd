@@ -6,7 +6,13 @@ from webdriver_manager.chrome import ChromeDriverManager
 from bs4 import BeautifulSoup
 import time
 from ignore_patterns_list import ignore_patterns
-import json
+from datetime import datetime
+
+from selenium.webdriver.common.by import By
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
+from selenium.common.exceptions import TimeoutException
+
 
 def get_bing_organic_links(query, page=1):
     # Setup Selenium WebDriver
@@ -25,7 +31,15 @@ def get_bing_organic_links(query, page=1):
     
     # Use Selenium to fetch the page
     driver.get(url)
-    time.sleep(2)  # Let the page load completely
+    
+    try:
+        WebDriverWait(driver, 20).until(EC.presence_of_element_located((By.CSS_SELECTOR, 'li.b_algo')))
+    except TimeoutException:
+        print("Element not found, printing page source for debugging.")
+        print(driver.page_source)  # Print the page source for diagnosis
+        driver.quit()
+        raise
+    
     page_source = driver.page_source
     
     driver.quit()  # Close the browser
@@ -75,7 +89,7 @@ def fetch_pages_content(urls_with_positions, max_position):
     options.add_argument("--headless")
     driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=options)
     
-    results = []
+    results = {}
     
     for url, position in urls_with_positions:
         if position > max_position:
@@ -92,30 +106,34 @@ def fetch_pages_content(urls_with_positions, max_position):
         # Extract title
         title = soup.title.string if soup.title else "No title"
         
-        # Extract meta description
+        # Try to extract meta description
         meta_description = ""
         meta_tag = soup.find("meta", attrs={"name": "description"})
         if meta_tag:
             meta_description = meta_tag.get("content", "")
         
-        # Extract first 10 internal links
-        internal_links = []
-        for a_tag in soup.find_all('a', href=True):
-            href = a_tag['href']
-            if href.startswith('/') or url in href:
-                internal_links.append(href)
-            if len(internal_links) == 10:
-                break
+        # If no meta description, try to extract headers and first paragraph
+        if not meta_description:
+            headers = []
+            for header_tag in ['h1', 'h2', 'h3']:
+                header = soup.find(header_tag)
+                if header:
+                    headers.append(header.get_text(strip=True))
+            
+            first_paragraph = ""
+            first_p_tag = soup.find('p')
+            if first_p_tag:
+                first_paragraph = first_p_tag.get_text(strip=True)
+            
+            # Combine headers and first paragraph as an alternative to meta description
+            meta_description = " ".join(headers + [first_paragraph]).strip()
         
-        # Store the result
-        result = {
-            "url": url,
+        # Store the result in a dictionary keyed by URL
+        results[url] = {
             "position": position,
             "title": title,
-            "meta_description": meta_description,
-            "internal_links": internal_links
+            "meta_description": meta_description
         }
-        results.append(result)
     
     driver.quit()  # Close the browser
     
@@ -143,13 +161,3 @@ def search_and_fetch_content(search_term, max_position):
     page_content = fetch_pages_content(processed_links, max_position)
     
     return page_content
-
-# Example usage
-if __name__ == "__main__":
-    search_term = "automated testing tools"
-    max_position = 10
-    content = search_and_fetch_content(search_term, max_position)
-    
-    # Convert the result to JSON and print
-    content_json = json.dumps(content, indent=4)
-    print(content_json)
