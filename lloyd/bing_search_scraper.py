@@ -1,3 +1,5 @@
+# filename: bing_search_scraper.py
+
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
 from webdriver_manager.chrome import ChromeDriverManager
@@ -10,61 +12,47 @@ from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import TimeoutException
 
 def get_search_result_urls(query, pages=5):
-    # Initialize a list to hold all the URLs from multiple pages
-    all_urls = []
+    all_urls = set()  # Using a set to store unique URLs
 
-    for page in range(1, pages + 1):
-        urls = get_bing_organic_links(query, page)
-        if urls:
-            all_urls.extend(urls)
-        else:
-            break
-        time.sleep(2)  # Be polite and delay before making another request
-
-    return all_urls
-
-def get_bing_organic_links(query, page=1):
-    # Setup Selenium WebDriver
     options = webdriver.ChromeOptions()
     options.add_argument("--headless")
     driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=options)
-    
-    # Format the query to replace spaces with '+'
+
+    try:
+        for page in range(1, pages + 1):
+            urls = get_bing_organic_links(driver, query, page)
+            if urls:
+                all_urls.update(urls)  # Use update to add items to the set
+            else:
+                break
+            time.sleep(2)
+    finally:
+        driver.quit()
+
+    return list(all_urls)  # Convert the set back to a list
+
+def get_bing_organic_links(driver, query, page=1):
     formatted_query = query.replace(' ', '+')
-    
-    # Calculate the `first` parameter value based on the page number
-    start_index = (page - 1) * 10 + 1  # Page 1 -> first=1, Page 2 -> first=11, etc.
-    
-    # Bing search URL with pagination
+    start_index = (page - 1) * 10 + 1
     url = f'https://www.bing.com/search?q={formatted_query}&first={start_index}'
-    
-    # Use Selenium to fetch the page
+
     driver.get(url)
-    
+
     try:
         WebDriverWait(driver, 20).until(EC.presence_of_element_located((By.CSS_SELECTOR, 'li.b_algo')))
     except TimeoutException:
-        print("Element not found, printing page source for debugging.")
-        print(driver.page_source)  # Print the page source for diagnosis
-        driver.quit()
-        raise
+        print(f"Timeout while loading page {page} for query: {query}")
+        return []
     
     page_source = driver.page_source
-    
-    driver.quit()  # Close the browser
-    
-    # Parse the page source with BeautifulSoup
     soup = BeautifulSoup(page_source, 'html.parser')
-    
-    # Find all organic search result links
+
     organic_links = []
     for a_tag in soup.find_all('a', href=True):
         href = a_tag['href']
-        # Filter out non-organic links (ads, Bing's internal links, etc.)
         if href.startswith('http') and not 'bing.com' in href:
             organic_links.append(href)
-    
-    # Apply the filter to remove unwanted URLs
+
     filtered_links = filter_bing_results(organic_links)
     return filtered_links
 
@@ -73,6 +61,4 @@ def filter_bing_results(urls):
     for url in urls:
         if not any(pattern in url for pattern in ignore_patterns):
             filtered_urls.append(url)
-    
     return filtered_urls
-

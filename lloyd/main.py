@@ -2,7 +2,7 @@ import json
 from collections import Counter
 from fetch_content import fetch_content_from_url
 from datetime import datetime, timezone
-from bing_organic_results_selenium import get_search_result_urls
+from bing_search_scraper import get_search_result_urls
 from ai_handler import classify_page_with_ai, extract_keywords_with_ai
 
 def main(target_url, search_term, max_position=10):
@@ -68,6 +68,6 @@ def main(target_url, search_term, max_position=10):
 # Example usage
 if __name__ == "__main__":
     target_url = "https://mysitefaster.com"
-    search_term = "fazer website"
+    search_term = "melhorar website"
     result_json = main(target_url, search_term)
     print(result_json)
