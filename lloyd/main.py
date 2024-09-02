@@ -9,7 +9,7 @@ from ai_handler import classify_page_with_ai, extract_keywords_with_ai
 
 def main(target_url, search_term, max_position=10):
     # Step 1: Fetch URLs from the SERP based on the target keyword
-    urls = get_search_result_urls(search_term)  # Get URLs from Bing search results
+    urls = get_search_result_urls(search_term)  #    Get URLs from Bing search results
 
     competitors = []
     influencers = []
@@ -65,7 +65,8 @@ def main(target_url, search_term, max_position=10):
         "keyword_gap": keyword_gap
     }
 
-    return json.dumps(result, indent=4)
+    # Ensure Latin characters are preserved
+    return json.dumps(result, indent=4, ensure_ascii=False)
 
 # Example usage
 if __name__ == "__main__":
